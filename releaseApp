@@ -1,0 +1,12 @@
+# 1. Generar nueva APK
+flutter build apk --release
+
+# 2. Copiar a la carpeta de updates
+copy build\app\outputs\flutter-apk\app-release.apk C:\Users\cesar\AndroidStudioProjects\la-polla-millonaria-updates\
+
+# 3. Crear nuevo release (cambia la versión)
+cd C:\Users\cesar\AndroidStudioProjects\la-polla-millonaria-updates
+git add app-release.apk
+git commit -m "v1.0.1"
+git push
+gh release create v1.0.1 --title "Versión 1.0.1" --notes "- Correcciones de bugs\n- Mejoras de rendimiento" app-release.apk

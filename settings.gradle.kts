@@ -1,0 +1,1 @@
+rootProject.name = "la_polla_millonaria"

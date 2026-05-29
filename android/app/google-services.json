@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "534568987267",
+    "project_id": "la-polla-millonaria",
+    "storage_bucket": "la-polla-millonaria.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:534568987267:android:d95270992332e3862709b6",
+        "android_client_info": {
+          "package_name": "com.example.la_polla_millonaria"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDn4cSHeCRyjFOQ-E8OYjJplbz25rkv_lE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

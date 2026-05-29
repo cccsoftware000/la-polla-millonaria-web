@@ -1,0 +1,31 @@
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "la-polla-millonaria",
+          "appId": "1:534568987267:android:d95270992332e3862709b6",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "la-polla-millonaria",
+          "configurations": {
+            "android": "1:534568987267:android:d95270992332e3862709b6",
+            "ios": "1:534568987267:ios:723601d5e2ac4cee2709b6",
+            "macos": "1:534568987267:ios:723601d5e2ac4cee2709b6",
+            "web": "1:534568987267:web:72304fde965adfa72709b6",
+            "windows": "1:534568987267:web:bf1a82f759f35c052709b6"
+          }
+        }
+      }
+    }
+  },
+  "functions": {
+    "source": "functions",
+    "predeploy": [
+      "npm --prefix \"$RESOURCE_DIR\" install"
+    ]
+  }
+}
