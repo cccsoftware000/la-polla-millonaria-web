@@ -1,45 +1,225 @@
-.gradle
-build/
-!gradle/wrapper/gradle-wrapper.jar
-!**/src/main/**/build/
-!**/src/test/**/build/
+# ====================
+# IDE Y EDITORES
+# ====================
 
-### IntelliJ IDEA ###
+### Android Studio / IntelliJ ###
+*.iml
+*.ipr
+*.iws
+.idea/
 .idea/modules.xml
 .idea/jarRepositories.xml
 .idea/compiler.xml
 .idea/libraries/
-*.iws
-*.iml
-*.ipr
-out/
-!**/src/main/**/out/
-!**/src/test/**/out/
-
-### Eclipse ###
-.apt_generated
-.classpath
-.factorypath
-.project
-.settings
-.springBeans
-.sts4-cache
-bin/
-!**/src/main/**/bin/
-!**/src/test/**/bin/
-
-### NetBeans ###
-/nbproject/private/
-/nbbuild/
-/dist/
-/nbdist/
-/.nb-gradle/
+*.swp
+*.swo
+*~
 
 ### VS Code ###
 .vscode/
+*.code-workspace
 
-### Mac OS ###
-.DS_Store
+### Visual Studio ###
+*.user
+*.suo
+*.sln
+*.csproj
 
-.env
+# ====================
+# DEPENDENCIAS Y BUILD
+# ====================
+
+### Flutter ###
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-build/
+.pub-cache/
+.pub/
+/build/
+build/
+/flutter_export_environment.sh
+/coverage/
+*.log
+
+### Android ###
+.gradle/
+gradle/
+gradlew
+gradlew.bat
+local.properties
+*.jks
+*.keystore
+*.p12
+*.pem
+*.cer
+*.crt
+*.key
+*.pkcs12
+key.properties
+android/app/.cxx/
+android/app/build/
+android/.gradle/
+android/local.properties
+android/**/GeneratedPluginRegistrant.java
+
+### iOS ###
+ios/Flutter/flutter_export_environment.sh
+ios/Flutter/Generated.xcconfig
+ios/Podfile.lock
+ios/Pods/
+ios/.symlinks/
+ios/Runner.xcworkspace/xcuserdata/
+ios/Runner/GeneratedPluginRegistrant.h
+ios/Runner/GeneratedPluginRegistrant.m
+*.xcworkspace/xcuserdata/
+*.xcuserstate
+*.xcuserdatad
+*.xcshareddata
+Podfile.lock
+*.mode1v3
+*.mode2v3
+*.pbxuser
+*.perspectivev3
+
+### Web ###
+build/web/
+*.dart.js
+*.dart.js.map
+*.dart.browser_module.js
+*.dart.browser_module.js.map
+*.dart.js.deps
+*.dart.js.map.deps
+*.part.js
+*.part.js.map
+canvaskit/
+
+# ====================
+# SEGURIDAD Y CREDENCIALES (MUY IMPORTANTE)
+# ====================
+
+### Credenciales y claves ###
+*.json
+*.key
+*.p8
+*.p12
+*.pem
+*.cer
+*.crt
 *.env
+*.env.*
+.env.*
+.env
+.env.production
+.env.development
+.env.local
+*.secret
+secrets/
+keys/
+credentials/
+serviceAccountKey.json
+service-account.json
+firebase-adminsdk*.json
+*.pem
+*.pk8
+*.der
+*.crt
+*.crl
+
+### Firebase ###
+lib/firebase_options.dart
+firebase_options.dart
+ios/firebase_app_id_file.json
+android/app/google-services.json
+GoogleService-Info.plist
+
+### API Keys ###
+*.api
+apikey.txt
+api_key.txt
+apikey.json
+api_key.json
+
+# ====================
+# ARCHIVOS DE CONFIGURACIÓN LOCAL
+# ====================
+
+### Config local ###
+*.config.local
+*.local.config
+config.json
+settings.json
+local.properties
+.credentials
+
+### Logs ###
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+### Archivos temporales ###
+*.tmp
+*.temp
+*.cache
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+### Reportes ###
+*.gcno
+*.gcda
+*.gcov
+test-results/
+test-report/
+coverage/
+
+# ====================
+# HERRAMIENTAS DE DESARROLLO
+# ====================
+
+### Node.js ###
+node_modules/
+package-lock.json
+yarn.lock
+.npm/
+.nvmrc
+
+### Python ###
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+ENV/
+
+### Docker ###
+*.tar
+*.tar.gz
+docker-compose.override.yml
+
+### Terraform ###
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# ====================
+# FLUTTER SPECIFIC
+# ====================
+
+*.class
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+hs_err_pid*
+replay_pid*
