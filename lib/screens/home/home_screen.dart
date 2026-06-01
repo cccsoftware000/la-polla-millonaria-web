@@ -55,7 +55,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _loadDataOnce();
     AnalyticsService.logScreen(screenName: 'home_screen');
 
     SystemChrome.setSystemUIOverlayStyle(
@@ -75,7 +74,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       duration: const Duration(seconds: 2),
     )..repeat(reverse: true);
 
-    loadUser();
+    _loadDataOnce();
     _loadMatchesForActivePolla();
 
     _refreshTimer = Timer.periodic(const Duration(minutes: 5), (timer) {
@@ -99,6 +98,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final currentUser = await userService.getCurrentUser();
     final jornadas = await _pollaService.getAvailableJornadas();
     final allBets = await betService.getUserBets();
+
+    // Cargar partidos de TODAS las jornadas antes de mostrar la UI
+    for (final jornada in jornadas) {
+      try {
+        final matches = await _matchService.getMatchesForBetScreen(jornada.id);
+        if (matches.isNotEmpty) {
+          MatchConstants.setMatches(matches, pollaId: jornada.id);
+        }
+      } catch (e) {
+        print('Error cargando partidos para ${jornada.id}: $e');
+      }
+    }
 
     if (mounted) {
       setState(() {
@@ -681,7 +692,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Widget _buildStatsRow() {
     final pendingCount = getPendingBetsCount();
     final activeCount = getActiveBetsCount();
-    final totalMatches = MatchConstants.getMatchCount();
+    final totalMatches = MatchConstants.getMatchCount(pollaId: _selectedJornada?.id);
 
     return Row(
       children: [
@@ -755,79 +766,87 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildAvailableBetsCard() {
+    final bool canPlay = _selectedJornada == null || !_selectedJornada!.isClosed;
+
     return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const BetScreen()),
-        ).then((_) => _refreshData());
-      },
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(24),
-          gradient: LinearGradient(
-            colors: [
-              Colors.white.withValues(alpha: 0.06),
-              Colors.white.withValues(alpha: 0.02),
-            ],
+      onTap: canPlay
+          ? () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const BetScreen()),
+              ).then((_) => _refreshData());
+            }
+          : null,
+      child: AnimatedOpacity(
+        opacity: canPlay ? 1.0 : 0.5,
+        duration: const Duration(milliseconds: 300),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(24),
+            gradient: LinearGradient(
+              colors: [
+                Colors.white.withValues(alpha: 0.06),
+                Colors.white.withValues(alpha: 0.02),
+              ],
+            ),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
           ),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Row(
-            children: [
-              Container(
-                width: 50,
-                height: 50,
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [AppColors.primaryPurple, AppColors.energeticRed],
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(
+              children: [
+                Container(
+                  width: 50,
+                  height: 50,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [AppColors.primaryPurple, AppColors.energeticRed],
+                    ),
+                    borderRadius: BorderRadius.circular(16),
                   ),
-                  borderRadius: BorderRadius.circular(16),
+                  child: Center(
+                    child: Text(canPlay ? '🏆' : '🔒', style: const TextStyle(fontSize: 26)),
+                  ),
                 ),
-                child: const Center(
-                  child: Text('🏆', style: TextStyle(fontSize: 26)),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        canPlay ? 'Jornada Activa' : 'Jornada Cerrada',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.5),
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _selectedJornada?.name ?? (_jornadas.isNotEmpty ? _jornadas.firstWhere((j) => j.isActive, orElse: () => _jornadas.first).name : 'La Polla Millonaria'),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${MatchConstants.getMatchCount(pollaId: _selectedJornada?.id)} partidos disponibles',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.5),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Jornada Activa',
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      _selectedJornada?.name ?? 'La Polla Millonaria',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${MatchConstants.getMatchCount()} partidos disponibles',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.5),
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
+                Icon(
+                  canPlay ? Icons.arrow_forward_ios : Icons.lock_outline,
+                  size: 18,
+                  color: Colors.white.withValues(alpha: 0.3),
                 ),
-              ),
-              Icon(
-                Icons.arrow_forward_ios,
-                size: 18,
-                color: Colors.white.withValues(alpha: 0.3),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -872,7 +891,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     for (int i = 0; i < bet.predictions.length; i++) {
       final prediction = bet.predictions[i];
-      final match = MatchConstants.getMatchByIndex(i);
+      final match = MatchConstants.getMatchByIndex(i, pollaId: bet.pollaId);
 
       final hasRealResult = match['realHomeScore'] != null && match['realAwayScore'] != null;
       if (hasRealResult) {
@@ -1035,7 +1054,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   children: displayedPredictions.asMap().entries.map((entry) {
                     final index = entry.key;
                     final prediction = entry.value;
-                    final match = MatchConstants.getMatchByIndex(index);
+                    final match = MatchConstants.getMatchByIndex(index, pollaId: bet.pollaId);
                     final isLast = index == displayedPredictions.length - 1;
 
                     // ✅ Verificar si el usuario acertó este partido
@@ -1382,37 +1401,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   // lib/screens/home/home_screen.dart
 
   Future<void> _loadMatchesForActivePolla() async {
-    try {
-      // ✅ Intentar cargar la polla activa primero
-      PollaModel? polla = await _pollaService.getActivePolla();
-
-      // ✅ Si no hay activa, buscar la última jornada (aunque esté cerrada)
-      if (polla == null) {
-        final allPollas = await _pollaService.getAllPollas();
-        if (allPollas.isNotEmpty) {
-          // Tomar la más reciente por fecha
-          polla = allPollas.first;
-          print('📊 No hay polla activa, usando última: ${polla.name} (${polla.status})');
-        }
-      }
-
-      if (polla != null) {
-        final matches = await _matchService.getMatchesForBetScreen(polla.id);
-        if (matches.isNotEmpty) {
-          MatchConstants.setMatches(matches, pollaId: polla.id);
-          print('✅ Cargados ${matches.length} partidos para ${polla.name}');
-        }
-      } else {
-        print('⚠️ No se encontró ninguna polla');
-      }
-    } catch (e) {
-      print('Error loading matches: $e');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoadingMatches = false;
-        });
-      }
+    // loadUser() ya carga partidos de todas las jornadas
+    if (mounted) {
+      setState(() {
+        _isLoadingMatches = false;
+      });
     }
   }
 }

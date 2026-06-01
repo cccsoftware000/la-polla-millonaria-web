@@ -264,7 +264,7 @@ class _RankingScreenState extends State<RankingScreen> {
 
     for (int i = 0; i < bet.predictions.length; i++) {
       final prediction = bet.predictions[i];
-      final match = MatchConstants.getMatchByIndex(i);
+      final match = MatchConstants.getMatchByIndex(i, pollaId: bet.pollaId);
 
       if (match['realHomeScore'] != null && match['realAwayScore'] != null) {
         totalFinished++;
@@ -381,7 +381,7 @@ class _RankingScreenState extends State<RankingScreen> {
                 children: allPredictions.asMap().entries.map((entry) {
                   final index = entry.key;
                   final prediction = entry.value;
-                  final match = MatchConstants.getMatchByIndex(index);
+                  final match = MatchConstants.getMatchByIndex(index, pollaId: bet.pollaId);
                   final isLast = index == allPredictions.length - 1;
 
                   final hasRealResult = match['realHomeScore'] != null && match['realAwayScore'] != null;

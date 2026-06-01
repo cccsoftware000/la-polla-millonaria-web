@@ -253,7 +253,7 @@ class _BetDetailScreenState extends State<BetDetailScreen> {
     // Verificar cuántos partidos están cerrados
     int closedMatches = 0;
     for (int i = 0; i < currentBet.predictions.length; i++) {
-      if (MatchConstants.isMatchClosed(i)) {
+      if (MatchConstants.isMatchClosed(i, pollaId: currentBet.pollaId)) {
         closedMatches++;
       }
     }
@@ -304,9 +304,9 @@ class _BetDetailScreenState extends State<BetDetailScreen> {
       children: currentBet.predictions.asMap().entries.map((entry) {
         final index = entry.key;
         final prediction = entry.value;
-        final match = MatchConstants.getMatchByIndex(index);
-        final isClosed = MatchConstants.isMatchClosed(index);
-        final remainingTime = MatchConstants.getFormattedRemainingTime(index);
+        final match = MatchConstants.getMatchByIndex(index, pollaId: currentBet.pollaId);
+        final isClosed = MatchConstants.isMatchClosed(index, pollaId: currentBet.pollaId);
+        final remainingTime = MatchConstants.getFormattedRemainingTime(index, pollaId: currentBet.pollaId);
 
         // ✅ Verificar si el partido tiene resultado real
         final hasRealResult = match['realHomeScore'] != null && match['realAwayScore'] != null;

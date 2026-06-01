@@ -1,14 +1,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import '../theme/app_colors.dart';
-import '../utils/date_utils.dart';
 
 class MatchConstants {
-  static List<Map<String, dynamic>> _matches = [];
+  static final Map<String, List<Map<String, dynamic>>> _matchesByPolla = {};
   static String? _currentPollaId;
 
   static void setMatches(List<Map<String, dynamic>> matches, {String? pollaId}) {
-    _matches = matches.map((match) {
+    final key = pollaId ?? _currentPollaId ?? '_default';
+    _matchesByPolla[key] = matches.map((match) {
       DateTime dateTime;
       if (match['dateTime'] is Timestamp) {
         dateTime = (match['dateTime'] as Timestamp).toDate();
@@ -20,44 +19,58 @@ class MatchConstants {
 
       return {
         ...match,
-        'dateTime': dateTime,  // Ya en hora Colombia
+        'dateTime': dateTime,
         'realHomeScore': match['realHomeScore'],
         'realAwayScore': match['realAwayScore'],
       };
     }).toList();
-    _currentPollaId = pollaId;
+    _currentPollaId = key;
   }
 
-  static List<Map<String, dynamic>> getAllMatches() {
-    return _matches;
+  static List<Map<String, dynamic>> _getMatches({String? pollaId}) {
+    final key = pollaId ?? _currentPollaId ?? '_default';
+    return _matchesByPolla[key] ?? [];
   }
 
-  static int getMatchCount() {
-    return _matches.length;
+  static List<Map<String, dynamic>> getAllMatches({String? pollaId}) {
+    return _getMatches(pollaId: pollaId);
   }
 
-  static Map<String, dynamic> getMatchByIndex(int index) {
-    if (index < _matches.length) {
-      return _matches[index];
+  static int getMatchCount({String? pollaId}) {
+    return _getMatches(pollaId: pollaId).length;
+  }
+
+  static Map<String, dynamic> getMatchByIndex(int index, {String? pollaId}) {
+    final matches = _getMatches(pollaId: pollaId);
+    if (index < matches.length) {
+      return matches[index];
     }
-    return _matches.isEmpty ? {} : _matches[0];
+    return matches.isEmpty ? {} : matches[0];
   }
 
   static String? getCurrentPollaId() => _currentPollaId;
 
-  static void clear() {
-    _matches = [];
-    _currentPollaId = null;
+  static void clear({String? pollaId}) {
+    if (pollaId != null) {
+      _matchesByPolla.remove(pollaId);
+      if (_currentPollaId == pollaId) {
+        _currentPollaId = _matchesByPolla.keys.isNotEmpty ? _matchesByPolla.keys.last : null;
+      }
+    } else {
+      _matchesByPolla.clear();
+      _currentPollaId = null;
+    }
   }
 
-  // ==================== MÉTODOS DE TIEMPO ====================
+  // ==================== METODOS DE TIEMPO ====================
 
-  static Duration getRemainingTime(int index) {
-    if (index >= _matches.length) return Duration.zero;
+  static Duration getRemainingTime(int index, {String? pollaId}) {
+    final matches = _getMatches(pollaId: pollaId);
+    if (index >= matches.length) return Duration.zero;
 
-    final match = _matches[index];
-    final matchDateTime = match['dateTime'] as DateTime; // ✅ Hora Colombia
-    final now = DateTime.now(); // ✅ Hora local del dispositivo (Colombia si configurado)
+    final match = matches[index];
+    final matchDateTime = match['dateTime'] as DateTime;
+    final now = DateTime.now();
 
     if (now.isAfter(matchDateTime)) {
       return Duration.zero;
@@ -66,8 +79,8 @@ class MatchConstants {
     return matchDateTime.difference(now);
   }
 
-  static String getFormattedRemainingTime(int index) {
-    final remaining = getRemainingTime(index);
+  static String getFormattedRemainingTime(int index, {String? pollaId}) {
+    final remaining = getRemainingTime(index, pollaId: pollaId);
 
     if (remaining <= Duration.zero) {
       return "Cerrado";
@@ -86,24 +99,25 @@ class MatchConstants {
     }
   }
 
-  static bool isMatchClosed(int index) {
-    return getRemainingTime(index) <= Duration.zero;
+  static bool isMatchClosed(int index, {String? pollaId}) {
+    return getRemainingTime(index, pollaId: pollaId) <= Duration.zero;
   }
 
-  static bool areAllMatchesClosed() {
-    for (int i = 0; i < _matches.length; i++) {
-      if (!isMatchClosed(i)) {
+  static bool areAllMatchesClosed({String? pollaId}) {
+    final matches = _getMatches(pollaId: pollaId);
+    for (int i = 0; i < matches.length; i++) {
+      if (!isMatchClosed(i, pollaId: pollaId)) {
         return false;
       }
     }
     return true;
   }
 
-  static DateTime? getNearestClosingDate() {
+  static DateTime? getNearestClosingDate({String? pollaId}) {
+    final matches = _getMatches(pollaId: pollaId);
     DateTime? nearest;
 
-    for (int i = 0; i < _matches.length; i++) {
-      final match = _matches[i];
+    for (final match in matches) {
       final matchDateTime = match['dateTime'] as DateTime;
       final now = DateTime.now();
 
@@ -117,8 +131,8 @@ class MatchConstants {
     return nearest;
   }
 
-  static String getGlobalCountdown() {
-    final nearest = getNearestClosingDate();
+  static String getGlobalCountdown({String? pollaId}) {
+    final nearest = getNearestClosingDate(pollaId: pollaId);
 
     if (nearest == null) {
       return "Torneo finalizado";
@@ -146,7 +160,6 @@ class MatchConstants {
 
   // ==================== WIDGETS UI ====================
 
-  // En matches_constants.dart (ya lo tienes, pero asegúrate)
   static Widget buildTeamLogo(String assetPath, String emoji, double size) {
     return Image.asset(
       assetPath,
@@ -175,13 +188,13 @@ class MatchConstants {
   static Widget buildTournamentBadge(String tournament) {
     Color badgeColor;
     switch (tournament) {
-      case '🌎 CONMEBOL Libertadores':
+      case 'CONMEBOL Libertadores':
         badgeColor = Colors.green;
         break;
-      case '🏆 CONMEBOL Sudamericana':
+      case 'CONMEBOL Sudamericana':
         badgeColor = Colors.blue;
         break;
-      case '🏆 UEFA Champions League':
+      case 'UEFA Champions League':
         badgeColor = Colors.purple;
         break;
       default:

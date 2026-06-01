@@ -230,8 +230,8 @@ class _BetScreenState extends State<BetScreen> with TickerProviderStateMixin {
       return _buildErrorScreen();
     }
 
-    final matches = MatchConstants.getAllMatches();
-    if (matches.isEmpty) {
+      final matches = MatchConstants.getAllMatches(pollaId: _activePolla?.id);
+      if (matches.isEmpty) {
       return _buildEmptyScreen();
     }
 
@@ -260,7 +260,7 @@ class _BetScreenState extends State<BetScreen> with TickerProviderStateMixin {
                       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                       physics: const BouncingScrollPhysics(),
                       itemCount: matches.length,
-                      itemBuilder: (_, index) => _buildMatchCard(index),
+                      itemBuilder: (_, index) => _buildMatchCard(index, pollaId: _activePolla?.id),
                     ),
                   ),
                   _buildConfirmButton(),
@@ -521,9 +521,9 @@ class _BetScreenState extends State<BetScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildMatchCard(int index) {
-    final match = MatchConstants.getMatchByIndex(index);
-    final isClosed = MatchConstants.isMatchClosed(index);
+  Widget _buildMatchCard(int index, {String? pollaId}) {
+    final match = MatchConstants.getMatchByIndex(index, pollaId: pollaId);
+    final isClosed = MatchConstants.isMatchClosed(index, pollaId: pollaId);
 
     // ✅ Obtener la fecha UTC del match y formatearla correctamente
     final utcDateTime = match['dateTime'] as DateTime;
@@ -667,7 +667,7 @@ class _BetScreenState extends State<BetScreen> with TickerProviderStateMixin {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _buildScoreButton(localControllers[index], localFocusNodes[index], index, true, isClosed),
+              _buildScoreButton(localControllers[index], localFocusNodes[index], index, true, isClosed, pollaId: pollaId),
               Container(
                 margin: const EdgeInsets.symmetric(horizontal: 12),
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -685,7 +685,7 @@ class _BetScreenState extends State<BetScreen> with TickerProviderStateMixin {
                   ),
                 ),
               ),
-              _buildScoreButton(visitorControllers[index], visitorFocusNodes[index], index, false, isClosed),
+              _buildScoreButton(visitorControllers[index], visitorFocusNodes[index], index, false, isClosed, pollaId: pollaId),
             ],
           ),
         ],
@@ -693,7 +693,7 @@ class _BetScreenState extends State<BetScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildScoreButton(TextEditingController controller, FocusNode focusNode, int index, bool isLocal, bool isClosed) {
+  Widget _buildScoreButton(TextEditingController controller, FocusNode focusNode, int index, bool isLocal, bool isClosed, {String? pollaId}) {
     int value = int.tryParse(controller.text) ?? 0;
 
     void updateValue(int newValue) {
@@ -755,7 +755,7 @@ class _BetScreenState extends State<BetScreen> with TickerProviderStateMixin {
                 }
                 if (isLocal) {
                   FocusScope.of(context).requestFocus(visitorFocusNodes[index]);
-                } else if (index < MatchConstants.getMatchCount() - 1) {
+                } else if (index < MatchConstants.getMatchCount(pollaId: pollaId) - 1) {
                   FocusScope.of(context).requestFocus(localFocusNodes[index + 1]);
                 }
               },
@@ -833,7 +833,7 @@ class _BetScreenState extends State<BetScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _handleConfirmBet() async {
-    final matches = MatchConstants.getAllMatches();
+    final matches = MatchConstants.getAllMatches(pollaId: _activePolla?.id);
 
     // Verificar si la polla sigue activa
     if (_activePolla != null) {
@@ -846,7 +846,7 @@ class _BetScreenState extends State<BetScreen> with TickerProviderStateMixin {
 
     // Verificar si algún partido ya cerró
     for (int i = 0; i < matches.length; i++) {
-      if (MatchConstants.isMatchClosed(i)) {
+      if (MatchConstants.isMatchClosed(i, pollaId: _activePolla?.id)) {
         _showErrorSnackbar('El partido ${matches[i]['local']} vs ${matches[i]['visitor']} ya cerró. No se puede apostar.');
         return;
       }
