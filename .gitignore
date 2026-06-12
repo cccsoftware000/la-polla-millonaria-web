@@ -96,6 +96,20 @@ build/web/
 canvaskit/
 
 # ====================
+# FUNCIONES DE FIREBASE
+# ====================
+functions/node_modules/
+functions/package-lock.json
+functions/.runtimeconfig.json
+
+# ====================
+# SCRIPTS INTERNOS / ONE-TIME (no subir a produccion)
+# ====================
+scripts/migrate_accumulated.js
+scripts/recreate_jornada*.py
+scripts/run_scrutiny.js
+
+# ====================
 # SEGURIDAD Y CREDENCIALES (MUY IMPORTANTE)
 # ====================
 

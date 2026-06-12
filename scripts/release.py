@@ -121,7 +121,7 @@ def prompt_notes(new_version):
     return body
 
 
-def git_commit_and_push(version, dry_run=False):
+def git_commit_and_push(version, dry_run=False, auto_yes=False):
     print("\n  [GIT] Creando commit y tag git...")
     status = run("git status --porcelain", dry_run=dry_run)
     if dry_run:
@@ -133,6 +133,23 @@ def git_commit_and_push(version, dry_run=False):
         print("  [!] No hay cambios para commitear")
         return
     run("git add -A")
+    # Verificar que no se hayan colado node_modules, .dart_tool, etc.
+    staged = run("git diff --cached --name-only")
+    suspicious = [f for f in staged.split("\n") if "node_modules" in f or ".dart_tool" in f or f.endswith(".lock")]
+    if suspicious:
+        print("  [⚠] Archivos sospechosos detectados en el commit:")
+        for f in suspicious[:10]:
+            print(f"     - {f}")
+        print("  [i] Revisa .gitignore antes de continuar")
+        if not auto_yes:
+            try:
+                confirm = input("  Continuar de todas formas? (s/N): ")
+                if confirm.lower() != "s":
+                    print("[x] Commit cancelado")
+                    sys.exit(1)
+            except EOFError:
+                print("  [⚠] No se pudo confirmar. Usa --yes para auto-aceptar.")
+                sys.exit(1)
     run(f'git commit -m "release: v{version}"')
     run(f'git tag -a v{version} -m "Version {version}"')
     print(f"  [OK] Commit y tag v{version} creados")
@@ -240,7 +257,7 @@ def main():
     print("\n" + "-" * 55)
     print("[GIT] COMMIT, TAG & PUSH")
     print("-" * 55)
-    git_commit_and_push(new_version, dry_run)
+    git_commit_and_push(new_version, dry_run, auto_yes=args.yes)
 
     # 8. GitHub Release
     print("\n" + "-" * 55)
