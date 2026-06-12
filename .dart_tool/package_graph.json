@@ -5,7 +5,7 @@
   "packages": [
     {
       "name": "la_polla_millonaria",
-      "version": "1.0.3",
+      "version": "1.0.7",
       "dependencies": [
         "cached_network_image",
         "cloud_firestore",

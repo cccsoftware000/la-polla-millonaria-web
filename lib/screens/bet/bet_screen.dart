@@ -17,8 +17,9 @@ import '../../models/bet_model.dart';
 
 class BetScreen extends StatefulWidget {
   final BetModel? betToEdit;
+  final String? pollaId;
 
-  const BetScreen({super.key, this.betToEdit});
+  const BetScreen({super.key, this.betToEdit, this.pollaId});
 
   @override
   State<BetScreen> createState() => _BetScreenState();
@@ -57,16 +58,23 @@ class _BetScreenState extends State<BetScreen> with TickerProviderStateMixin {
     AnalyticsService.logScreen(screenName: 'bet_screen');
     _loadData();
     _initializeControllers();
-    _loadActivePolla();
+    if (widget.pollaId == null) {
+      _loadActivePolla();
+    }
     _setupAnimations();
   }
 
   Future<void> _loadData() async {
-    if (_dataLoaded) return; // ✅ Evita recargas múltiples
+    if (_dataLoaded) return;
 
     setState(() => _isLoading = true);
 
-    // ✅ Intentar cargar desde cache primero
+    if (widget.pollaId != null) {
+      await _loadPollaById(widget.pollaId!);
+      _dataLoaded = true;
+      return;
+    }
+
     final cachedMatches = await CacheService.getCachedMatches();
     final cachedPolla = await CacheService.getCachedPolla();
 
@@ -80,7 +88,6 @@ class _BetScreenState extends State<BetScreen> with TickerProviderStateMixin {
       return;
     }
 
-    // Si no hay cache, cargar desde Firestore
     await _loadActivePolla();
     _dataLoaded = true;
   }
@@ -182,6 +189,62 @@ class _BetScreenState extends State<BetScreen> with TickerProviderStateMixin {
       MatchConstants.setMatches(matchesData, pollaId: polla.id);
 
       // ✅ Reinitializar controladores (esto conserva los valores de edición)
+      _reinitializeControllers(matchesData.length);
+
+      setState(() {
+        _activePolla = polla;
+        _isLoading = false;
+      });
+
+      _startCountdownTimer();
+
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Error al cargar la polla: $e';
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _loadPollaById(String pollaId) async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final polla = await _pollaService.getPollaById(pollaId);
+
+      if (polla == null) {
+        setState(() {
+          _errorMessage = 'No se encontró la jornada solicitada.';
+          _isLoading = false;
+        });
+        return;
+      }
+
+      if (!isEditing) {
+        final canBet = await _matchService.canBetOnPolla(polla.id);
+        if (!canBet) {
+          setState(() {
+            _errorMessage = 'La polla ya cerró. Los partidos ya comenzaron.';
+            _isLoading = false;
+          });
+          return;
+        }
+      }
+
+      final matchesData = await _matchService.getMatchesForBetScreen(polla.id);
+
+      if (matchesData.isEmpty) {
+        setState(() {
+          _errorMessage = 'No hay partidos configurados para esta polla.';
+          _isLoading = false;
+        });
+        return;
+      }
+
+      MatchConstants.setMatches(matchesData, pollaId: polla.id);
       _reinitializeControllers(matchesData.length);
 
       setState(() {

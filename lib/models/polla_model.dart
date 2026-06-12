@@ -7,12 +7,13 @@ class PollaModel {
   final DateTime startDate;
   final DateTime endDate;
   final int prizeAmount;
+  final int finalPrizeAmount;
   final List<String> winnerIds;
   final int winnerCount;
   final int winnerPrize;
   final DateTime? createdAt;
-  final DateTime? closedAt; // ✅ Agregar este campo
-
+  final DateTime? closedAt;
+  final DateTime? processedAt;
 
   PollaModel({
     required this.id,
@@ -21,11 +22,13 @@ class PollaModel {
     required this.startDate,
     required this.endDate,
     required this.prizeAmount,
+    this.finalPrizeAmount = 0,
     this.winnerIds = const [],
     this.winnerCount = 0,
     this.winnerPrize = 0,
     this.createdAt,
     this.closedAt,
+    this.processedAt,
   });
 
   factory PollaModel.fromMap(String id, Map<String, dynamic> map) {
@@ -36,11 +39,13 @@ class PollaModel {
       startDate: (map['startDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
       endDate: (map['endDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
       prizeAmount: map['prizeAmount'] ?? 100000,
+      finalPrizeAmount: map['finalPrizeAmount'] ?? 0,
       winnerIds: List<String>.from(map['winnerIds'] ?? []),
       winnerCount: map['winnerCount'] ?? 0,
       winnerPrize: map['winnerPrize'] ?? 0,
       createdAt: (map['createdAt'] as Timestamp?)?.toDate(),
       closedAt: (map['closedAt'] as Timestamp?)?.toDate(),
+      processedAt: (map['processedAt'] as Timestamp?)?.toDate(),
     );
   }
 
@@ -49,6 +54,7 @@ class PollaModel {
   bool get isClosed => closedAt != null || status != 'ACTIVE';
   bool get isFinished => status == 'FINISHED';
   bool get isCancelled => status == 'CANCELLED';
+  bool get isUnscruited => processedAt == null;
 
   bool get canBet => isActive && DateTime.now().isBefore(endDate);
   Map<String, dynamic> toMap() {

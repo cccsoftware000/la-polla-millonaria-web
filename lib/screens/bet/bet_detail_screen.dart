@@ -10,6 +10,7 @@ import '../../core/theme/app_colors.dart';
 import '../../models/bet_model.dart';
 import '../../services/bet_service.dart';
 import '../../services/analytics_service.dart';
+import '../../services/match_service.dart';
 
 import '../../widgets/bet/bet_status_banner.dart';
 import '../../widgets/bet/detail_info_chip.dart';
@@ -28,6 +29,7 @@ class BetDetailScreen extends StatefulWidget {
 
 class _BetDetailScreenState extends State<BetDetailScreen> {
   final BetService betService = BetService();
+  final MatchService _matchService = MatchService();
   bool isLoading = false;
   String _voucherCode = '';
   late BetModel currentBet;
@@ -38,11 +40,27 @@ class _BetDetailScreenState extends State<BetDetailScreen> {
     super.initState();
     currentBet = widget.bet;
 
+    // Asegurar que los partidos de esta jornada esten cargados para countdowns correctos.
+    _loadMatchesForBetPolla();
+
     // Timer para actualizar UI si la apuesta está pendiente (por si cambia estado)
     if (currentBet.status == BetStatus.pendingPayment) {
       _refreshTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
         _refreshBet();
       });
+    }
+  }
+
+  Future<void> _loadMatchesForBetPolla() async {
+    try {
+      if (currentBet.pollaId.isEmpty) return;
+      final matches = await _matchService.getMatchesForBetScreen(currentBet.pollaId);
+      if (matches.isNotEmpty) {
+        MatchConstants.setMatches(matches, pollaId: currentBet.pollaId);
+        if (mounted) setState(() {});
+      }
+    } catch (_) {
+      // No bloquear la pantalla por fallos de carga de cache.
     }
   }
 
@@ -281,7 +299,7 @@ class _BetDetailScreenState extends State<BetDetailScreen> {
         DetailInfoChip(
           icon: Icons.access_time,
           label: 'Próximo cierre',
-          value: MatchConstants.getGlobalCountdown(),
+          value: MatchConstants.getGlobalCountdown(pollaId: currentBet.pollaId),
         ),
       ],
     );
@@ -337,8 +355,8 @@ class _BetDetailScreenState extends State<BetDetailScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Badge del torneo
-              if (match != null)
-                MatchConstants.buildTournamentBadge(match["tournament"]),
+              if (match != null && match["tournament"] != null)
+                MatchConstants.buildTournamentBadge(match["tournament"] as String),
               const SizedBox(height: 12),
 
               // Fecha y hora del partido

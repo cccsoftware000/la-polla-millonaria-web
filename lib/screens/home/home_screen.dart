@@ -1,7 +1,9 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 
 import '../../core/constants/bet_status.dart';
 import '../../core/constants/matches_constants.dart';
@@ -10,16 +12,16 @@ import '../../core/utils/bet_status_helper.dart';
 import '../../core/utils/team_name_utils.dart';
 import '../../models/polla_model.dart';
 import '../../models/user_model.dart';
-import '../../services/accumulated_service.dart';
+import '../../services/github_update_service.dart';
+import '../../services/polla_service.dart';
 import '../../services/analytics_service.dart';
 import '../../services/cache_service.dart';
 import '../../services/match_service.dart';
-import '../../services/polla_service.dart';
 import '../../services/user_service.dart';
 import '../../services/bet_service.dart';
 import '../../models/bet_model.dart';
-import '../../widgets/animated_accumulated_card.dart';
 import '../../widgets/predictions_carousel.dart';
+import '../../widgets/update_dialog.dart';
 import '../bet/bet_detail_screen.dart';
 import '../bet/bet_screen.dart';
 import '../profile/profile_screen.dart';
@@ -33,7 +35,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
+class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin, WidgetsBindingObserver {
   final UserService userService = UserService();
   final BetService betService = BetService();
   final MatchService _matchService = MatchService();
@@ -51,10 +53,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   PollaModel? _selectedJornada;
   bool _isLoadingJornadas = true;
   bool _isRefreshingJornadas = false;
+  int _lastPrizeAmount = 0;
+  bool _showIncreaseAnim = false;
+  int _lastIncrease = 0;
+  late AnimationController _slideController;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     AnalyticsService.logScreen(screenName: 'home_screen');
 
     SystemChrome.setSystemUIOverlayStyle(
@@ -74,12 +81,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       duration: const Duration(seconds: 2),
     )..repeat(reverse: true);
 
+    _slideController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+
     _loadDataOnce();
     _loadMatchesForActivePolla();
 
     _refreshTimer = Timer.periodic(const Duration(minutes: 5), (timer) {
       _refreshData();
     });
+
+    _checkUpdates();
   }
 
   Future<void> _loadDataOnce() async {
@@ -96,11 +110,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   Future<void> loadUser() async {
     final currentUser = await userService.getCurrentUser();
-    final jornadas = await _pollaService.getAvailableJornadas();
-    final allBets = await betService.getUserBets();
+    final unscruited = await _pollaService.getUnscruitedJornadas();
 
-    // Cargar partidos de TODAS las jornadas antes de mostrar la UI
-    for (final jornada in jornadas) {
+    // Cargar partidos de todas las jornadas no escrutadas
+    for (final jornada in unscruited) {
       try {
         final matches = await _matchService.getMatchesForBetScreen(jornada.id);
         if (matches.isNotEmpty) {
@@ -111,12 +124,25 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       }
     }
 
+    // Seleccionar la primera jornada no escrutada por defecto
+    final defaultJornada = unscruited.isNotEmpty ? unscruited.first : null;
+    final allBets = await betService.getUserBets();
+
+    // Filtrar apuestas para la jornada seleccionada (o todas las no escrutadas)
+    List<BetModel> initialBets;
+    if (defaultJornada != null && currentUser != null) {
+      initialBets = await _pollaService.getBetsByPolla(currentUser.uid, defaultJornada.id);
+    } else {
+      final unscruitedIds = unscruited.map((j) => j.id).toSet();
+      initialBets = allBets.where((b) => unscruitedIds.contains(b.pollaId)).toList();
+    }
+
     if (mounted) {
       setState(() {
         user = currentUser;
-        bets = allBets;
-        _jornadas = jornadas;
-        _selectedJornada = null;
+        bets = initialBets;
+        _jornadas = unscruited;
+        _selectedJornada = defaultJornada;
         isLoading = false;
         _isLoadingJornadas = false;
       });
@@ -134,7 +160,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     try {
       List<BetModel> filteredBets;
       if (jornada == null) {
-        filteredBets = await betService.getUserBets();
+        // "Todas" — solo apuestas de jornadas no escrutadas
+        final allBets = await betService.getUserBets();
+        final unscruitedIds = _jornadas.map((j) => j.id).toSet();
+        filteredBets = allBets.where((b) => unscruitedIds.contains(b.pollaId)).toList();
       } else {
         filteredBets = await _pollaService.getBetsByPolla(user!.uid, jornada.id);
       }
@@ -160,8 +189,93 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
+  Future<void> _navigateToBet() async {
+    final activeJornadas = _jornadas.where((j) => j.status == 'ACTIVE' && j.closedAt == null).toList();
+
+    PollaModel? targetPolla;
+
+    if (_selectedJornada != null && _selectedJornada!.status == 'ACTIVE' && _selectedJornada!.closedAt == null) {
+      targetPolla = _selectedJornada;
+    } else if (activeJornadas.length == 1) {
+      targetPolla = activeJornadas.first;
+    } else if (activeJornadas.length > 1) {
+      targetPolla = await _showActiveJornadaSelector(activeJornadas);
+    }
+
+    if (targetPolla == null || !mounted) return;
+    final pollaId = targetPolla.id;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BetScreen(pollaId: pollaId),
+      ),
+    ).then((_) => _refreshData());
+  }
+
+  Future<PollaModel?> _showActiveJornadaSelector(List<PollaModel> activeJornadas) async {
+    return showDialog<PollaModel>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A2E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Text('Selecciona una jornada', style: TextStyle(color: Colors.white, fontSize: 18)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: activeJornadas.map((jornada) => Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: GestureDetector(
+              onTap: () => Navigator.pop(context, jornada),
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.sports_soccer, color: AppColors.primaryPurple, size: 20),
+                    const SizedBox(width: 12),
+                    Text(jornada.name, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+            ),
+          )).toList(),
+        ),
+      ),
+    );
+  }
+
   Widget _buildJornadaSelector() {
-    if (_jornadas.isEmpty) return const SizedBox.shrink();
+    if (_jornadas.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 24),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          color: Colors.white.withValues(alpha: 0.04),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+        ),
+        child: Center(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.info_outline, size: 14, color: Colors.white.withValues(alpha: 0.4)),
+              const SizedBox(width: 8),
+              Text(
+                'No hay jornadas activas',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.5),
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -293,26 +407,35 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   Future<void> _refreshData() async {
     final currentUser = await userService.getCurrentUser();
-    final jornadas = await _pollaService.getAvailableJornadas();
+    final unscruited = await _pollaService.getUnscruitedJornadas();
+    final unscruitedIds = unscruited.map((j) => j.id).toSet();
 
-    if (_selectedJornada != null && currentUser != null) {
-      final filteredBets = await _pollaService.getBetsByPolla(
+    List<BetModel> refreshedBets;
+    if (_selectedJornada != null && unscruitedIds.contains(_selectedJornada!.id) && currentUser != null) {
+      refreshedBets = await _pollaService.getBetsByPolla(
         currentUser.uid,
         _selectedJornada!.id,
       );
-      if (mounted) {
-        setState(() {
-          user = currentUser;
-          bets = filteredBets;
-          _jornadas = jornadas;
-        });
-      }
-    } else if (mounted) {
+    } else if (currentUser != null) {
       final allBets = await betService.getUserBets();
+      refreshedBets = allBets.where((b) => unscruitedIds.contains(b.pollaId)).toList();
+    } else {
+      refreshedBets = [];
+    }
+
+    // Ajustar seleccion si la jornada actual ya no existe en no escrutadas
+    if (_selectedJornada != null && !unscruitedIds.contains(_selectedJornada!.id)) {
+      _selectedJornada = unscruited.isNotEmpty ? unscruited.first : null;
+      if (_selectedJornada != null && currentUser != null) {
+        refreshedBets = await _pollaService.getBetsByPolla(currentUser.uid, _selectedJornada!.id);
+      }
+    }
+
+    if (mounted) {
       setState(() {
         user = currentUser;
-        bets = allBets;
-        _jornadas = jornadas;
+        bets = refreshedBets;
+        _jornadas = unscruited;
       });
     }
   }
@@ -333,9 +456,34 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkUpdates();
+    }
+  }
+
+  Future<void> _checkUpdates() async {
+    try {
+      final updateService = GitHubUpdateService();
+      final release = await updateService.checkForUpdates();
+      if (release != null && mounted) {
+        await showDialog<void>(
+          context: context,
+          barrierDismissible: !release.isRequired,
+          builder: (_) => UpdateDialog(release: release, onUpdate: () {}),
+        );
+      }
+    } catch (e) {
+      print('Error checking updates in home: $e');
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     glowController.dispose();
     breathingController.dispose();
+    _slideController.dispose();
     _refreshTimer?.cancel();
     _betsSubscription?.cancel();
     super.dispose();
@@ -759,9 +907,215 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
+  void _checkPrizeIncrease(int newPrize) {
+    if (_lastPrizeAmount == 0 || newPrize <= _lastPrizeAmount) {
+      _lastPrizeAmount = newPrize;
+      return;
+    }
+    final increase = newPrize - _lastPrizeAmount;
+    _lastPrizeAmount = newPrize;
+    if (mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(() {
+          _lastIncrease = increase;
+          _showIncreaseAnim = true;
+        });
+        _slideController.forward().then((_) => _slideController.reset());
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted) setState(() => _showIncreaseAnim = false);
+        });
+      });
+    }
+  }
+
   Widget _buildPrizeCard() {
-    return AnimatedAccumulatedCard(
-      accumulatedStream: AccumulatedService().streamAccumulated(),
+    final pollaService = PollaService();
+    final settingsStream = FirebaseFirestore.instance.doc('settings/global').snapshots();
+
+    return StreamBuilder<PollaModel?>(
+      stream: pollaService.streamActivePolla(),
+      builder: (context, pollaSnap) {
+        if (pollaSnap.hasData && pollaSnap.data != null) {
+          final polla = pollaSnap.data!;
+          _checkPrizeIncrease(polla.prizeAmount);
+          return _buildAnimatedPrizeBody(
+            prize: polla.prizeAmount,
+            label: polla.name,
+          );
+        }
+        return StreamBuilder<DocumentSnapshot>(
+          stream: settingsStream,
+          builder: (context, settingsSnap) {
+            final data = settingsSnap.data?.data() as Map<String, dynamic>?;
+            final pendingCarry = (data?['pendingCarry'] as int?) ?? 0;
+            _checkPrizeIncrease(pendingCarry);
+            return _buildAnimatedPrizeBody(
+              prize: pendingCarry,
+              label: 'Se asigna cuando se cree la siguiente jornada',
+              isPendingCarry: true,
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildAnimatedPrizeBody({
+    required int prize,
+    required String label,
+    bool isPendingCarry = false,
+  }) {
+    String formatMoney(int value) => NumberFormat.currency(
+      locale: 'es_CO',
+      symbol: '\$',
+      decimalDigits: 0,
+    ).format(value);
+
+    return AnimatedBuilder(
+      animation: glowController,
+      builder: (context, _) {
+        return Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(32),
+            gradient: const LinearGradient(
+              colors: [AppColors.primaryPurple, AppColors.energeticRed],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.energeticRed.withValues(
+                  alpha: 0.35 + (glowController.value * 0.25),
+                ),
+                blurRadius: 25 + (glowController.value * 15),
+                spreadRadius: 2 + (glowController.value * 2),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              children: [
+                Text(
+                  isPendingCarry ? 'POZO EN ESPERA' : 'ACUMULADO ACTUAL',
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 11,
+                    letterSpacing: 2,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                AnimatedBuilder(
+                  animation: breathingController,
+                  builder: (context, _) {
+                    return Transform.scale(
+                      scale: 0.95 + (breathingController.value * 0.13),
+                      child: Container(
+                        width: 70,
+                        height: 70,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.white.withValues(alpha: 0.15),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.white.withValues(alpha: 0.3),
+                              blurRadius: 15,
+                            ),
+                          ],
+                        ),
+                        child: const Center(
+                          child: Text('⚽', style: TextStyle(fontSize: 38)),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 16),
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Text(
+                      formatMoney(prize),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 38,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: -1,
+                      ),
+                    ),
+                    if (_showIncreaseAnim)
+                      Positioned(
+                        top: -8,
+                        right: -8,
+                        child: AnimatedBuilder(
+                          animation: _slideController,
+                          builder: (context, _) {
+                            return Transform.translate(
+                              offset: Offset(
+                                0,
+                                -20 * (1 - _slideController.value),
+                              ),
+                              child: Opacity(
+                                opacity: _slideController.value > 0.7
+                                    ? 1 - (_slideController.value - 0.7) / 0.3
+                                    : 1,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.greenAccent.withValues(alpha: 0.25),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: Colors.greenAccent.withValues(alpha: 0.6),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(
+                                        Icons.trending_up,
+                                        color: Colors.greenAccent,
+                                        size: 10,
+                                      ),
+                                      const SizedBox(width: 2),
+                                      Text(
+                                        '+${formatMoney(_lastIncrease)}',
+                                        style: const TextStyle(
+                                          color: Colors.greenAccent,
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.75),
+                    fontSize: 12,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -770,12 +1124,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     return GestureDetector(
       onTap: canPlay
-          ? () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const BetScreen()),
-              ).then((_) => _refreshData());
-            }
+          ? () => _navigateToBet()
           : null,
       child: AnimatedOpacity(
         opacity: canPlay ? 1.0 : 0.5,
@@ -1344,12 +1693,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ),
           const SizedBox(height: 20),
           GestureDetector(
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const BetScreen()),
-              ).then((_) => _refreshData());
-            },
+            onTap: () => _navigateToBet(),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
               decoration: BoxDecoration(

@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../../core/constants/bet_status.dart';
 import '../../core/constants/matches_constants.dart';
 import '../../core/theme/app_colors.dart';
@@ -12,6 +13,7 @@ import '../../services/admin_bet_service.dart';
 import '../../services/match_service.dart';
 import '../../services/polla_service.dart';
 import '../../services/user_service.dart';
+import '../admin/admin_results_screen.dart';
 
 class ResultsScreen extends StatefulWidget {
   const ResultsScreen({super.key});
@@ -33,6 +35,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
   Map<String, UserModel> _usersCache = {};
   bool _isLoading = true;
   String? _errorMessage;
+  UserModel? _currentUser;
 
   @override
   void initState() {
@@ -47,6 +50,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
     });
 
     try {
+      _currentUser = await _userService.getCurrentUser();
       _jornadas = await _pollaService.getAvailableJornadas();
 
       if (_jornadas.isNotEmpty) {
@@ -180,6 +184,19 @@ class _ResultsScreenState extends State<ResultsScreen> {
             letterSpacing: 1,
           ),
         ),
+        actions: [
+          if (_currentUser?.isAdmin == true)
+            IconButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AdminResultsScreen()),
+                ).then((_) => _loadData());
+              },
+              icon: const Icon(Icons.shield, color: AppColors.primaryPurple),
+              tooltip: 'Administrar resultados',
+            ),
+        ],
       ),
       body: _isLoading
           ? const Center(
@@ -218,11 +235,13 @@ class _ResultsScreenState extends State<ResultsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  _buildPrizeInfo(),
+                  const SizedBox(height: 24),
                   _buildSectionTitle('PARTIDOS'),
                   const SizedBox(height: 8),
                   _buildMatchResults(),
                   const SizedBox(height: 24),
-                  _buildSectionTitle('GANADORES'),
+                  _buildSectionTitle('MEJORES PUNTUACIONES'),
                   const SizedBox(height: 8),
                   _buildWinnersSection(),
                 ],
@@ -294,6 +313,95 @@ class _ResultsScreenState extends State<ResultsScreen> {
             ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildPrizeInfo() {
+    if (_selectedJornada == null) return const SizedBox.shrink();
+
+    final jornada = _selectedJornada!;
+    final displayPrize = jornada.finalPrizeAmount > 0
+        ? jornada.finalPrizeAmount
+        : jornada.prizeAmount;
+    final isFinished = jornada.isFinished;
+    final hasWinners = jornada.winnerCount > 0 && jornada.winnerPrize > 0;
+
+    String formatMoney(int value) => NumberFormat.currency(
+      locale: 'es_CO',
+      symbol: '\$',
+      decimalDigits: 0,
+    ).format(value);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+      decoration: BoxDecoration(
+        color: isFinished
+            ? Colors.green.withValues(alpha: 0.06)
+            : Colors.white.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isFinished
+              ? Colors.greenAccent.withValues(alpha: 0.2)
+              : Colors.white.withValues(alpha: 0.08),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                isFinished ? 'POZO FINAL' : 'POZO ACUMULADO',
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.5),
+                  fontSize: 10,
+                  letterSpacing: 1,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (hasWinners)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.greenAccent.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '${jornada.winnerCount} ganador${jornada.winnerCount > 1 ? 'es' : ''}',
+                    style: const TextStyle(
+                      color: Colors.greenAccent,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            formatMoney(displayPrize),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          if (hasWinners)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                'Premio por ganador: ${formatMoney(jornada.winnerPrize)}',
+                style: TextStyle(
+                  color: Colors.greenAccent.withValues(alpha: 0.7),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -425,6 +533,8 @@ class _ResultsScreenState extends State<ResultsScreen> {
     );
   }
 
+  static const int _minExactHitsToWin = 4;
+
   Widget _buildWinnersSection() {
     if (_bets.isEmpty) {
       return Container(
@@ -463,9 +573,39 @@ class _ResultsScreenState extends State<ResultsScreen> {
     final topBets = List<BetModel>.from(_bets)..sort((a, b) => _calcExactHits(b).compareTo(_calcExactHits(a)));
     final topHits = topBets.isNotEmpty ? _calcExactHits(topBets.first) : 0;
     final leaders = topBets.where((b) => _calcExactHits(b) == topHits).toList();
+    final alguienGano = topHits >= _minExactHitsToWin;
 
     return Column(
       children: [
+        if (!alguienGano && total > 0)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+            decoration: BoxDecoration(
+              color: Colors.amber.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: Colors.amber.withValues(alpha: 0.25),
+              ),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline, color: Colors.amber, size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Nadie alcanzó $_minExactHitsToWin aciertos exactos. '
+                    'El acumulado continúa para la próxima jornada.',
+                    style: const TextStyle(
+                      color: Colors.amber,
+                      fontSize: 11,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         Container(
           width: double.infinity,
           padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
@@ -478,7 +618,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
             ),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: topHits == total && total > 0
+              color: alguienGano
                   ? Colors.greenAccent.withValues(alpha: 0.3)
                   : Colors.white.withValues(alpha: 0.08),
             ),
@@ -496,7 +636,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
               Text(
                 'Mejor puntaje: $topHits aciertos',
                 style: TextStyle(
-                  color: topHits == total && total > 0
+                  color: alguienGano
                       ? Colors.greenAccent
                       : Colors.orangeAccent,
                   fontSize: 11,
@@ -507,18 +647,18 @@ class _ResultsScreenState extends State<ResultsScreen> {
           ),
         ),
         const SizedBox(height: 8),
-        ...leaders.map((bet) => _buildLeaderCard(bet)),
+        ...leaders.map((bet) => _buildLeaderCard(bet, alguienGano)),
       ],
     );
   }
 
-  Widget _buildLeaderCard(BetModel bet) {
+  Widget _buildLeaderCard(BetModel bet, bool alguienGano) {
     final user = _usersCache[bet.uid];
     final userName = user?.name ?? 'Usuario ${bet.uid.substring(0, 6)}';
     final userAvatar = user?.avatar ?? '';
     final userHits = _calcExactHits(bet);
     final total = _totalFinished();
-    final isPerfect = userHits == total && total > 0;
+    final isPerfect = alguienGano && userHits == total && total > 0;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),

@@ -60,17 +60,19 @@ node update_results.js --list
 Procesa los resultados y determina ganadores.
 
 ```bash
-node run_scrutiny.js jornada_1
-node run_scrutiny.js jornada_2
+cd ../functions && node run_scrutiny.js
 ```
 
-> Marca la polla como `FINISHED`, calcula aciertos exactos, determina ganadores y reparte el acumulado.
+> Procesa automaticamente todas las pollas con `status` en `CLOSED/FINISHED` y `processedAt == null`.
+> Calcula aciertos exactos, determina ganadores (min 4 aciertos y solo los de maximo puntaje), reparte el pozo por jornada y hace rollover si no hay ganadores.
 
 ---
 
 ## 💳 CONFIRMAR PAGOS
 
 Marca apuestas como pagadas después de recibir el dinero.
+
+> Importante: cuando inicia el primer partido la polla pasa a `CLOSED` y las apuestas pendientes se marcan como `CANCELLED` (abandonadas). No se deben confirmar pagos despues del cierre.
 
 ```bash
 # Por ID de apuesta

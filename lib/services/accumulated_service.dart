@@ -1,17 +1,12 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import '../core/constants/bet_status.dart';
-import '../models/bet_model.dart';
 import '../models/global_settings_model.dart';
 
 class AccumulatedService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
 
   // Referencias a Firestore
   final String _settingsDocPath = 'settings/global';
-  final String _betsCollection = 'bets';
   final String _accumulatedHistoryCollection = 'accumulated_history';
 
   // Stream para escuchar cambios en tiempo real
@@ -49,70 +44,10 @@ class AccumulatedService {
   }
 
   // Incrementar acumulado cuando se confirma una apuesta
-  Future<void> incrementAccumulatedForBet(BetModel bet) async {
-    // Verificar que la apuesta está en estado PENDING_PAYMENT
-    if (bet.status != BetStatus.pendingPayment) {
-      throw Exception('Solo se pueden confirmar apuestas pendientes de pago');
-    }
-
-    // Verificar que no haya sido ya confirmada
-    if (bet.paymentConfirmed == true) {
-      throw Exception('Esta apuesta ya fue confirmada anteriormente');
-    }
-
-    final settings = await getCurrentSettings();
-    final increment = settings.getIncreaseForBet();
-
-    final docRef = _firestore.doc(_settingsDocPath);
-
-    // Usar transacción para evitar inconsistencias
-    await _firestore.runTransaction((transaction) async {
-      final docSnapshot = await transaction.get(docRef);
-
-      GlobalSettingsModel currentSettings;
-      if (docSnapshot.exists) {
-        currentSettings = GlobalSettingsModel.fromMap(docSnapshot.data()!);
-      } else {
-        currentSettings = GlobalSettingsModel(
-          betPrice: 5000,
-          accumulatedPercentage: 60,
-          currentAccumulated: 0,
-          lastAccumulatedIncrease: 0,
-          lastAccumulatedUpdate: DateTime.now(),
-        );
-      }
-
-      final newAccumulated = currentSettings.currentAccumulated + increment;
-
-      // Actualizar configuración global
-      transaction.update(docRef, {
-        'currentAccumulated': newAccumulated,
-        'lastAccumulatedIncrease': increment,
-        'lastAccumulatedUpdate': FieldValue.serverTimestamp(),
-      });
-
-      // Registrar historial del incremento
-      final historyRef = _firestore
-          .collection(_accumulatedHistoryCollection)
-          .doc();
-
-      transaction.set(historyRef, {
-        'betId': bet.id,
-        'increment': increment,
-        'previousAccumulated': currentSettings.currentAccumulated,
-        'newAccumulated': newAccumulated,
-        'timestamp': FieldValue.serverTimestamp(),
-        'betPrice': currentSettings.betPrice,
-        'percentage': currentSettings.accumulatedPercentage,
-      });
-
-      // Marcar la apuesta como confirmada
-      final betRef = _firestore.collection(_betsCollection).doc(bet.id);
-      transaction.update(betRef, {
-        'paymentConfirmed': true,
-        'paymentConfirmedAt': FieldValue.serverTimestamp(),
-      });
-    });
+  Future<void> incrementAccumulatedForBet() async {
+    // DEPRECADO: el pozo ahora se maneja por jornada en pollas/{pollaId}.prizeAmount
+    // y se incrementa unicamente en el backend (Cloud Function onBetPaid).
+    throw Exception('Incremento de acumulado deshabilitado en cliente.');
   }
 
   // Actualizar precio de apuesta (solo admin)

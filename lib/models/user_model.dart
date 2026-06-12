@@ -14,6 +14,9 @@ class UserModel {
   final int totalBetsWon;       // Apuestas ganadoras
   final int experiencePoints;   // Puntos de experiencia totales
   final int level;              // Nivel actual (1-10)
+  final String role;            // "user" | "admin"
+
+  bool get isAdmin => role == 'admin';
 
   UserModel({
     required this.uid,
@@ -28,6 +31,7 @@ class UserModel {
     this.totalBetsWon = 0,
     this.experiencePoints = 0,
     this.level = 1,
+    this.role = 'user',
   });
 
   factory UserModel.fromMap(Map<String, dynamic> map) {
@@ -44,6 +48,7 @@ class UserModel {
       totalBetsWon: map['totalBetsWon'] ?? 0,
       experiencePoints: map['experiencePoints'] ?? 0,
       level: map['level'] ?? 1,
+      role: map['role'] ?? 'user',
     );
   }
 
@@ -61,6 +66,7 @@ class UserModel {
       'totalBetsWon': totalBetsWon,
       'experiencePoints': experiencePoints,
       'level': level,
+      'role': role,
     };
   }
 

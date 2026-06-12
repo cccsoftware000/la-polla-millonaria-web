@@ -7,7 +7,7 @@ cd C:\Users\cesar\AndroidStudioProjects\la_polla_millonaria
 # 2. Limpiar y generar build
 flutter clean
 flutter pub get
-flutter build web --release --base-href /la-polla-millonaria-web/ --source-maps=false
+flutter build web --release --base-href /la-polla-millonaria-web/
 
 Write-Host " Build completado" -ForegroundColor Green
 

@@ -138,6 +138,31 @@ class MatchService {
     }
   }
 
+  Future<void> updateMatchResult({
+    required String matchId,
+    required int homeScore,
+    required int awayScore,
+  }) async {
+    await _firestore.collection('matches').doc(matchId).update({
+      'realHomeScore': homeScore,
+      'realAwayScore': awayScore,
+      'status': 'FINISHED',
+    });
+  }
+
+  Future<void> updateMatchScoresBatch(List<Map<String, dynamic>> results) async {
+    final batch = _firestore.batch();
+    for (final r in results) {
+      final ref = _firestore.collection('matches').doc(r['matchId'] as String);
+      batch.update(ref, {
+        'realHomeScore': r['homeScore'],
+        'realAwayScore': r['awayScore'],
+        'status': 'FINISHED',
+      });
+    }
+    await batch.commit();
+  }
+
   // Verificar si la polla aún puede recibir apuestas
   Future<bool> canBetOnPolla(String pollaId) async {
     try {

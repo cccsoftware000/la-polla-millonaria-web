@@ -9,6 +9,7 @@ import '../../models/bet_model.dart';
 import '../../models/polla_model.dart';
 import '../../models/user_model.dart';
 import '../../services/admin_bet_service.dart';
+import '../../services/match_service.dart';
 import '../../services/polla_service.dart';
 import '../../services/user_service.dart';
 
@@ -23,6 +24,7 @@ class _RankingScreenState extends State<RankingScreen> {
   final AdminBetService _adminBetService = AdminBetService();
   final PollaService _pollaService = PollaService();
   final UserService _userService = UserService();
+  final MatchService _matchService = MatchService();
 
   List<BetModel> _bets = [];
   List<PollaModel> _jornadas = [];
@@ -68,6 +70,14 @@ class _RankingScreenState extends State<RankingScreen> {
     setState(() => _isLoading = true);
 
     try {
+      // Precargar partidos de esta jornada si no están en cache
+      if (MatchConstants.getAllMatches(pollaId: pollaId).isEmpty) {
+        final matches = await _matchService.getMatchesForBetScreen(pollaId);
+        if (matches.isNotEmpty) {
+          MatchConstants.setMatches(matches, pollaId: pollaId);
+        }
+      }
+
       final bets = await _adminBetService.getBetsByJornada(pollaId);
 
       if (bets.isEmpty) {

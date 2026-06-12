@@ -258,6 +258,34 @@ class UserService {
     }
   }
 
+  Future<bool> isAdmin() async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return false;
+
+      final doc = await _firestore.collection('users').doc(user.uid).get();
+      if (!doc.exists) return false;
+
+      final role = doc.data()!['role'] as String?;
+      return role == 'admin';
+    } catch (e) {
+      print('Error checking admin role: $e');
+      return false;
+    }
+  }
+
+  Future<bool> checkAdminRole(String uid) async {
+    try {
+      final doc = await _firestore.collection('users').doc(uid).get();
+      if (!doc.exists) return false;
+      final role = doc.data()!['role'] as String?;
+      return role == 'admin';
+    } catch (e) {
+      print('Error checking admin role: $e');
+      return false;
+    }
+  }
+
   // lib/services/user_service.dart
 
 // Agregar estos métodos

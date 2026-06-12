@@ -1,18 +1,15 @@
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { onDocumentUpdated } = require('firebase-functions/v2/firestore');
-const { onRequest } = require('firebase-functions/v2/https');
 const admin = require('firebase-admin');
 admin.initializeApp();
 
 // ==================== CONFIGURACIÓN ====================
 const MIN_EXACT_HITS_TO_WIN = 4;
 
-// API Key desde variable de entorno
-const API_FOOTBALL_KEY = process.env.API_FOOTBALL_KEY || '';
+// Moneda mas baja en COP (para redondeos de premio)
+const COP_MIN_UNIT = 50;
 
-// Contador para límite diario (en memoria)
-let dailyRequestCount = 0;
-const DAILY_LIMIT = 90;
+// Nota: Se removieron funciones/servicios de API-Football del backend.
 
 // ==================== 1. CIERRE AUTOMÁTICO DE POLLAS EXPIRADAS ====================
 exports.closeExpiredPollas = onSchedule(
@@ -76,11 +73,37 @@ exports.checkFirstMatchStart = onSchedule(
             });
 
             if (firstMatchDate && firstMatchDate.toDate() <= now.toDate()) {
-                await admin.firestore().collection('pollas').doc(pollaDoc.id).update({
-                    'status': 'CLOSED',
-                    'closedAt': now,
-                    'closedReason': 'Primer partido iniciado',
+                const pollaRef = admin.firestore().collection('pollas').doc(pollaDoc.id);
+
+                // Cerrar la polla para apuestas
+                await pollaRef.update({
+                    status: 'CLOSED',
+                    closedAt: now,
+                    closedReason: 'Primer partido iniciado',
                 });
+
+                // Marcar apuestas pendientes como abandonadas
+                const pendingBets = await admin.firestore()
+                    .collection('bets')
+                    .where('pollaId', '==', pollaDoc.id)
+                    .where('status', '==', 'PENDING_PAYMENT')
+                    .where('deleted', '==', false)
+                    .limit(450)
+                    .get();
+
+                if (!pendingBets.empty) {
+                    const batch = admin.firestore().batch();
+                    for (const betDoc of pendingBets.docs) {
+                        batch.update(betDoc.ref, {
+                            status: 'CANCELLED',
+                            cancelledReason: 'Abandonada: inició el primer partido',
+                            cancelledAt: now,
+                        });
+                    }
+                    await batch.commit();
+                    console.log(`🗑️ ${pendingBets.size} apuestas abandonadas en ${pollaDoc.id}`);
+                }
+
                 closedCount++;
                 console.log(`🔒 Polla cerrada: ${pollaDoc.id}`);
             }
@@ -89,132 +112,122 @@ exports.checkFirstMatchStart = onSchedule(
     }
 );
 
-// ==================== 4. ACTUALIZAR RESULTADOS AUTOMÁTICOS ====================
-exports.updateMatchResults = onSchedule(
-    {
-        schedule: '0 1,7,13,19 * * *',
-        timeZone: 'America/Bogota',
-        region: 'us-central1',
-    },
-    async () => {
-        console.log('🔄 Actualizando resultados de partidos...');
-
-        const apiKey = API_FOOTBALL_KEY;
-
-        if (!apiKey) {
-            console.log('❌ API Key no configurada');
-            return;
-        }
-
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-
-        const matchesToUpdate = await admin.firestore()
-            .collection('matches')
-            .where('realHomeScore', '==', null)
-            .where('dateTime', '>=', yesterday)
-            .get();
-
-        if (matchesToUpdate.empty) {
-            console.log('📭 No hay partidos pendientes');
-            return;
-        }
-
-        let updatedCount = 0;
-        for (const matchDoc of matchesToUpdate.docs) {
-            const match = matchDoc.data();
-            const apiFixtureId = match.apiFixtureId;
-
-            if (!apiFixtureId) continue;
-
-            try {
-                const response = await fetch(
-                    `https://v3.football.api-sports.io/fixtures?id=${apiFixtureId}`,
-                    {
-                        headers: {
-                            'x-rapidapi-key': apiKey,
-                            'x-rapidapi-host': 'v3.football.api-sports.io',
-                        },
-                    }
-                );
-
-                const data = await response.json();
-                const fixture = data.response?.[0];
-
-                if (fixture?.fixture?.status?.short === 'FT') {
-                    await matchDoc.ref.update({
-                        realHomeScore: fixture.goals.home,
-                        realAwayScore: fixture.goals.away,
-                        status: 'FINISHED',
-                    });
-                    updatedCount++;
-                    console.log(`✅ ${match.local} ${fixture.goals.home} - ${fixture.goals.away} ${match.visitor}`);
-                }
-
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            } catch (e) {
-                console.log(`❌ Error: ${match.local} - ${e.message}`);
-            }
-        }
-        console.log(`✅ ${updatedCount} partidos actualizados`);
-    }
-);
-
 // ==================== 5. CONFIRMAR PAGO ====================
 exports.onBetPaid = onDocumentUpdated(
     {
         document: 'bets/{betId}',
-        region: 'us-central1',
+        region: 'southamerica-east1',
+        serviceAccount: 'la-polla-millonaria@appspot.gserviceaccount.com',
     },
     async (event) => {
         const before = event.data.before.data();
         const after = event.data.after.data();
 
-        if (before.paymentConfirmed !== true && after.paymentConfirmed === true) {
-            console.log(`💰 Procesando pago: ${event.params.betId}`);
+        // Solo procesar la transicion false -> true
+        if (before.paymentConfirmed === true || after.paymentConfirmed !== true) {
+            return;
+        }
 
-            const pollaDoc = await admin.firestore()
-                .collection('pollas')
-                .doc(after.pollaId)
-                .get();
+        console.log(`💰 Procesando pago: ${event.params.betId}`);
 
-            if (!pollaDoc.exists || pollaDoc.data()?.status !== 'ACTIVE') {
-                await event.data.after.ref.update({
-                    'status': 'CANCELLED',
-                    'cancelledReason': 'Polla cerrada',
+        const betRef = event.data.after.ref;
+        const pollaRef = admin.firestore().collection('pollas').doc(after.pollaId);
+        const settingsRef = admin.firestore().doc('settings/global');
+        const userRef = admin.firestore().collection('users').doc(after.uid);
+        const historyRef = admin.firestore().collection('accumulated_history').doc();
+
+        await admin.firestore().runTransaction(async (tx) => {
+            const [pollaSnap, settingsSnap] = await Promise.all([
+                tx.get(pollaRef),
+                tx.get(settingsRef),
+            ]);
+
+            if (!pollaSnap.exists) {
+                tx.update(betRef, {
+                    status: 'CANCELLED',
+                    cancelledReason: 'Polla no existe',
+                    cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
                 });
                 return;
             }
 
-            await admin.firestore().collection('users').doc(bet.uid).update({
-              'totalBetsPaid': admin.firestore.FieldValue.increment(1),
-              'experiencePoints': admin.firestore.FieldValue.increment(50),
-            });
+            const polla = pollaSnap.data() || {};
+            const pollaIsOpenForBets = polla.status === 'ACTIVE' && !polla.closedAt;
 
-            const settingsDoc = await admin.firestore().doc('settings/global').get();
-            let settings = settingsDoc.data();
-            if (!settings) {
-                settings = { betPrice: 5000, accumulatedPercentage: 60, currentAccumulated: 100000 };
-                await admin.firestore().doc('settings/global').set(settings);
+            // Si ya arranco el primer partido (polla cerrada para apostar), la apuesta se considera abandonada.
+            if (!pollaIsOpenForBets) {
+                tx.update(betRef, {
+                    status: 'CANCELLED',
+                    cancelledReason: 'Abandonada: inició el primer partido',
+                    cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+                });
+                return;
             }
 
-            const increment = Math.floor(settings.betPrice * settings.accumulatedPercentage / 100);
-            const newAccumulated = settings.currentAccumulated + increment;
+            const settings = settingsSnap.exists ? (settingsSnap.data() || {}) : {};
+            const betPrice = typeof settings.betPrice === 'number' ? settings.betPrice : 5000;
+            const accumulatedPercentage = typeof settings.accumulatedPercentage === 'number' ? settings.accumulatedPercentage : 60;
+            const basePot = typeof settings.basePot === 'number' ? settings.basePot : 100000;
+            const pendingCarry = typeof settings.pendingCarry === 'number' ? settings.pendingCarry : 0;
 
-            await admin.firestore().doc('settings/global').update({
-                'currentAccumulated': newAccumulated,
-                'lastAccumulatedIncrease': increment,
+            // Si no existe settings/global lo inicializamos con defaults.
+            if (!settingsSnap.exists) {
+                tx.set(settingsRef, {
+                    betPrice,
+                    accumulatedPercentage,
+                    basePot,
+                    pendingCarry: 0,
+                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                });
+            } else {
+                // Asegurar campos nuevos sin pisar configuracion existente.
+                const patch = {};
+                if (settings.basePot === undefined) patch.basePot = basePot;
+                if (settings.pendingCarry === undefined) patch.pendingCarry = pendingCarry;
+                if (Object.keys(patch).length) {
+                    patch.updatedAt = admin.firestore.FieldValue.serverTimestamp();
+                    tx.update(settingsRef, patch);
+                }
+            }
+
+            const increment = Math.floor((betPrice * accumulatedPercentage) / 100);
+
+            const previousPrize = typeof polla.prizeAmount === 'number' ? polla.prizeAmount : basePot;
+            let newPrize = previousPrize + increment;
+
+            // Si hay carry vivo sin asignar, se aplica a la proxima polla abierta a apuestas en el primer pago.
+            if (pendingCarry > 0) {
+                newPrize += pendingCarry;
+                tx.update(settingsRef, {
+                    pendingCarry: 0,
+                    pendingCarryAppliedAt: admin.firestore.FieldValue.serverTimestamp(),
+                });
+            }
+
+            tx.update(pollaRef, {
+                prizeAmount: newPrize,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             });
 
-            await admin.firestore().collection('accumulated_history').add({
-                'betId': event.params.betId,
-                'pollaId': after.pollaId,
-                'increment': increment,
+            tx.set(historyRef, {
+                betId: event.params.betId,
+                pollaId: after.pollaId,
+                increment,
+                previousAccumulated: previousPrize,
+                newAccumulated: newPrize,
+                timestamp: admin.firestore.FieldValue.serverTimestamp(),
             });
 
-            await event.data.after.ref.update({ 'status': 'ACTIVE' });
-            console.log(`💰 Acumulado: +${increment}`);
-        }
+            tx.update(userRef, {
+                totalBetsPaid: admin.firestore.FieldValue.increment(1),
+                experiencePoints: admin.firestore.FieldValue.increment(50),
+            });
+
+            // Asegurar estado ACTIVE (idempotente)
+            tx.update(betRef, { status: 'ACTIVE' });
+        });
+
+        console.log('💰 Pago procesado y pozo actualizado');
     }
 );
 
@@ -281,299 +294,4 @@ exports.cleanOldAccumulatedHistory = onSchedule(
     }
 );
 
-// ==================== 7. API-FOOTBALL PROXY FUNCTIONS (SEGURAS) ====================
-
-// Resetear contador diario
-exports.resetDailyCounter = onSchedule(
-    {
-        schedule: '0 0 * * *',
-        timeZone: 'America/Bogota',
-        region: 'us-central1',
-    },
-    async () => {
-        dailyRequestCount = 0;
-        console.log('🔄 Contador de API resetado a 0');
-    }
-);
-
-// Obtener resultados en vivo
-exports.getLiveFixtures = onRequest(
-    {
-        cors: true,
-        region: 'us-central1',
-    },
-    async (req, res) => {
-        if (dailyRequestCount >= DAILY_LIMIT) {
-            console.warn('⚠️ Límite diario de API alcanzado');
-            res.status(429).json({ error: 'Límite de peticiones alcanzado. Intenta más tarde.' });
-            return;
-        }
-
-        dailyRequestCount++;
-
-        try {
-            const apiKey = process.env.API_FOOTBALL_KEY;
-
-            if (!apiKey) {
-                console.error('❌ API_FOOTBALL_KEY no configurada');
-                res.status(500).json({ error: 'API key no configurada' });
-                return;
-            }
-
-            const response = await fetch('https://v3.football.api-sports.io/fixtures?live=all', {
-                headers: {
-                    'x-rapidapi-key': apiKey,
-                    'x-rapidapi-host': 'v3.football.api-sports.io',
-                },
-            });
-
-            const data = await response.json();
-            res.status(200).json(data);
-        } catch (error) {
-            console.error('Error en getLiveFixtures:', error);
-            res.status(500).json({ error: error.message });
-        }
-    }
-);
-
-// Obtener resultado de un fixture específico
-exports.getFixtureById = onRequest(
-    {
-        cors: true,
-        region: 'us-central1',
-    },
-    async (req, res) => {
-        if (dailyRequestCount >= DAILY_LIMIT) {
-            res.status(429).json({ error: 'Límite de peticiones alcanzado' });
-            return;
-        }
-
-        dailyRequestCount++;
-
-        try {
-            const { fixtureId } = req.query;
-
-            if (!fixtureId) {
-                res.status(400).json({ error: 'fixtureId es requerido' });
-                return;
-            }
-
-            const apiKey = process.env.API_FOOTBALL_KEY;
-
-            if (!apiKey) {
-                res.status(500).json({ error: 'API key no configurada' });
-                return;
-            }
-
-            const response = await fetch(`https://v3.football.api-sports.io/fixtures?id=${fixtureId}`, {
-                headers: {
-                    'x-rapidapi-key': apiKey,
-                    'x-rapidapi-host': 'v3.football.api-sports.io',
-                },
-            });
-
-            const data = await response.json();
-            res.status(200).json(data);
-        } catch (error) {
-            console.error('Error en getFixtureById:', error);
-            res.status(500).json({ error: error.message });
-        }
-    }
-);
-
-// Obtener partidos por fecha
-exports.getFixturesByDate = onRequest(
-    {
-        cors: true,
-        region: 'us-central1',
-    },
-    async (req, res) => {
-        if (dailyRequestCount >= DAILY_LIMIT) {
-            res.status(429).json({ error: 'Límite de peticiones alcanzado' });
-            return;
-        }
-
-        dailyRequestCount++;
-
-        try {
-            const { date } = req.query;
-
-            if (!date) {
-                res.status(400).json({ error: 'date es requerido (YYYY-MM-DD)' });
-                return;
-            }
-
-            const apiKey = process.env.API_FOOTBALL_KEY;
-
-            if (!apiKey) {
-                res.status(500).json({ error: 'API key no configurada' });
-                return;
-            }
-
-            const response = await fetch(`https://v3.football.api-sports.io/fixtures?date=${date}`, {
-                headers: {
-                    'x-rapidapi-key': apiKey,
-                    'x-rapidapi-host': 'v3.football.api-sports.io',
-                },
-            });
-
-            const data = await response.json();
-            res.status(200).json(data);
-        } catch (error) {
-            console.error('Error en getFixturesByDate:', error);
-            res.status(500).json({ error: error.message });
-        }
-    }
-);
-
-// Obtener información de un equipo
-exports.getTeamInfo = onRequest(
-    {
-        cors: true,
-        region: 'us-central1',
-    },
-    async (req, res) => {
-        if (dailyRequestCount >= DAILY_LIMIT) {
-            res.status(429).json({ error: 'Límite de peticiones alcanzado' });
-            return;
-        }
-
-        dailyRequestCount++;
-
-        try {
-            const { teamId } = req.query;
-
-            if (!teamId) {
-                res.status(400).json({ error: 'teamId es requerido' });
-                return;
-            }
-
-            const apiKey = process.env.API_FOOTBALL_KEY;
-
-            if (!apiKey) {
-                res.status(500).json({ error: 'API key no configurada' });
-                return;
-            }
-
-            const response = await fetch(`https://v3.football.api-sports.io/teams?id=${teamId}`, {
-                headers: {
-                    'x-rapidapi-key': apiKey,
-                    'x-rapidapi-host': 'v3.football.api-sports.io',
-                },
-            });
-
-            const data = await response.json();
-            res.status(200).json(data);
-        } catch (error) {
-            console.error('Error en getTeamInfo:', error);
-            res.status(500).json({ error: error.message });
-        }
-    }
-);
-
-// ==================== PROCESAR POLLA (AUXILIAR) ====================
-async function processPolla(pollaId) {
-    console.log(`📊 Procesando polla: ${pollaId}`);
-
-    const matchesSnapshot = await admin.firestore()
-        .collection('matches')
-        .where('pollaId', '==', pollaId)
-        .get();
-
-    const results = {};
-    matchesSnapshot.docs.forEach((doc) => {
-        const data = doc.data();
-        if (data.realHomeScore !== undefined && data.realAwayScore !== undefined) {
-            results[doc.id] = { home: data.realHomeScore, away: data.realAwayScore };
-        }
-    });
-
-    const betsSnapshot = await admin.firestore()
-        .collection('bets')
-        .where('pollaId', '==', pollaId)
-        .where('status', '==', 'ACTIVE')
-        .where('deleted', '==', false)
-        .get();
-
-    if (betsSnapshot.empty) {
-        await admin.firestore().collection('pollas').doc(pollaId).update({
-            'status': 'FINISHED',
-            'processedAt': admin.firestore.FieldValue.serverTimestamp(),
-            'winnerCount': 0,
-        });
-        return;
-    }
-
-    const betUpdates = [];
-    for (const betDoc of betsSnapshot.docs) {
-        const bet = betDoc.data();
-        let exactHits = 0;
-        for (let i = 0; i < bet.predictions.length; i++) {
-            const matchId = bet.predictions[i].matchId;
-            const userHome = bet.predictions[i].homeScore;
-            const userAway = bet.predictions[i].awayScore;
-            const realResult = results[matchId];
-            if (realResult && userHome === realResult.home && userAway === realResult.away) {
-                exactHits++;
-            }
-        }
-        betUpdates.push({ ref: betDoc.ref, exactHits });
-    }
-
-    const batch = admin.firestore().batch();
-    for (const update of betUpdates) {
-        batch.update(update.ref, { exactHits: update.exactHits });
-    }
-    await batch.commit();
-
-    let maxHits = 0;
-    for (const update of betUpdates) {
-        if (update.exactHits >= MIN_EXACT_HITS_TO_WIN && update.exactHits > maxHits) {
-            maxHits = update.exactHits;
-        }
-    }
-
-    if (maxHits === 0) {
-        await admin.firestore().collection('pollas').doc(pollaId).update({
-            'status': 'FINISHED',
-            'processedAt': admin.firestore.FieldValue.serverTimestamp(),
-            'winnerCount': 0,
-        });
-        return;
-    }
-
-    const winners = betUpdates.filter(u => u.exactHits === maxHits);
-    const winnerCount = winners.length;
-    const settingsDoc = await admin.firestore().doc('settings/global').get();
-    const currentAccumulated = settingsDoc.data()?.currentAccumulated || 100000;
-    const winnerPrize = Math.floor(currentAccumulated / winnerCount);
-    const remainingAccumulated = currentAccumulated - winnerPrize;
-
-    const winnerBatch = admin.firestore().batch();
-    for (const winner of winners) {
-        winnerBatch.update(winner.ref, { status: 'WINNER', prize: winnerPrize });
-    }
-    for (const update of betUpdates) {
-        if (update.exactHits !== maxHits) {
-            winnerBatch.update(update.ref, { status: 'COMPLETED' });
-        }
-    }
-    await winnerBatch.commit();
-
-    await admin.firestore().collection('pollas').doc(pollaId).update({
-        'status': 'FINISHED',
-        'processedAt': admin.firestore.FieldValue.serverTimestamp(),
-        'winnerCount': winnerCount,
-        'winnerPrize': winnerPrize,
-        'winnerIds': winners.map(w => w.ref.id).toList(),
-        'maxExactHits': maxHits,
-    });
-
-    await admin.firestore().doc('settings/global').update({
-        'currentAccumulated': remainingAccumulated,
-        'lastWinnerPrize': winnerPrize,
-        'lastWinnerCount': winnerCount,
-    });
-
-    console.log(`🏆 ${winnerCount} ganadores con ${maxHits} aciertos. Premio: ${winnerPrize} c/u`);
-}
+// Nota: Se removieron las funciones HTTP/proxy de API-Football del backend.

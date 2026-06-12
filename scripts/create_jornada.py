@@ -301,14 +301,49 @@ def show_available_jornadas():
     print()
 
 
+def get_settings(dry_run=False):
+    """Lee basePot y pendingCarry de settings/global.
+    Retorna (base_pot, pending_carry).
+    Si pending_carry > 0, lo resetea a 0."""
+    settings_ref = db.collection("settings").document("global")
+    settings_doc = settings_ref.get()
+
+    if not settings_doc.exists:
+        return 100000, 0
+
+    data = settings_doc.to_dict()
+    base_pot = data.get("basePot", 100000)
+    pending_carry = data.get("pendingCarry", 0)
+
+    if dry_run:
+        if pending_carry > 0:
+            print(f"  [DRY] basePot: {base_pot:,}, pendingCarry: {pending_carry:,}")
+        return base_pot, pending_carry
+
+    if pending_carry > 0:
+        settings_ref.update({"pendingCarry": 0})
+        print(f"  [OK] pendingCarry ({pending_carry:,}) reseteada a 0 en settings/global")
+
+    return base_pot, pending_carry
+
+
 def create_polla(jornada_id, jornada_data, dry_run=False, append_mode=False):
     """Crear la polla/jornada en Firestore"""
+    base_pot, pending_carry = get_settings(dry_run)
+
+    if pending_carry > 0:
+        total_prize = pending_carry  # carry replaces base pot when previous jornada had no winners
+        print(f"  [i] Premio: {total_prize:,} (carry de jornada anterior, sin base pot)")
+    else:
+        total_prize = base_pot  # start fresh with base pot
+        print(f"  [i] Premio: {total_prize:,} (base pot, sin carry pendiente)")
+
     polla_doc = {
         "name": jornada_data["name"],
         "status": "ACTIVE",
         "startDate": jornada_data["start_date"],
         "endDate": jornada_data["first_match_date"],
-        "prizeAmount": jornada_data["prize_amount"],
+        "prizeAmount": total_prize,
         "winnerIds": [],
         "winnerCount": 0,
         "winnerPrize": 0,
@@ -388,6 +423,8 @@ def show_summary(jornada_id, jornada_data):
     print("=" * 50)
     print(f"  Nombre:    {jornada_data['name']}")
     print(f"  Partidos:  {len(jornada_data['matches'])}")
+    print(f"  Premio sugerido: {jornada_data['prize_amount']:,}")
+    print(f"  (si hay carry pendiente en settings/global, reemplaza al base pot)")
     if tbd:
         print(f"  [!] {tbd} partidos tienen datos TBD (rellenalos antes de ejecutar)")
     print()

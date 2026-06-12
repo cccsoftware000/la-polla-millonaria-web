@@ -37,11 +37,20 @@ class PollaService {
     return _firestore
         .collection('pollas')
         .where('status', isEqualTo: 'ACTIVE')
-        .limit(1)
         .snapshots()
         .map((snapshot) {
       if (snapshot.docs.isEmpty) return null;
-      return PollaModel.fromMap(snapshot.docs.first.id, snapshot.docs.first.data());
+
+      // Preferir la que este abierta a apuestas (sin closedAt)
+      for (final doc in snapshot.docs) {
+        final data = doc.data();
+        if (data['closedAt'] == null) {
+          return PollaModel.fromMap(doc.id, data);
+        }
+      }
+
+      // Si ninguna esta abierta, no hay polla activa para apostar
+      return null;
     });
   }
 
@@ -151,6 +160,30 @@ class PollaService {
       return result;
     } catch (e) {
       print('Error getting available jornadas: $e');
+      return [];
+    }
+  }
+
+  Future<List<PollaModel>> getUnscruitedJornadas() async {
+    try {
+      final snapshot = await _firestore
+          .collection('pollas')
+          .orderBy('startDate', descending: false)
+          .get();
+
+      final unscruited = snapshot.docs
+          .map((doc) => PollaModel.fromMap(doc.id, doc.data()))
+          .where((p) => p.isUnscruited)
+          .toList();
+
+      print('📊 Jornadas no escrutadas: ${unscruited.length}');
+      for (var j in unscruited) {
+        print('   - ${j.name}: status=${j.status}');
+      }
+
+      return unscruited;
+    } catch (e) {
+      print('Error getting unscruited jornadas: $e');
       return [];
     }
   }

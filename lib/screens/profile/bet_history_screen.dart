@@ -7,6 +7,7 @@ import '../../core/utils/bet_status_helper.dart';
 import '../../core/utils/team_name_utils.dart';
 import '../../models/bet_model.dart';
 import '../../services/bet_service.dart';
+import '../../services/match_service.dart';
 import '../bet/bet_detail_screen.dart';
 
 class BetHistoryScreen extends StatefulWidget {
@@ -18,6 +19,7 @@ class BetHistoryScreen extends StatefulWidget {
 
 class _BetHistoryScreenState extends State<BetHistoryScreen> {
   final BetService _betService = BetService();
+  final MatchService _matchService = MatchService();
 
   List<BetModel> _bets = [];
   bool _isLoading = true;
@@ -40,6 +42,19 @@ class _BetHistoryScreenState extends State<BetHistoryScreen> {
 
     try {
       final allBets = await _betService.getUserBets();
+
+      // Precargar partidos de todas las pollas con apuestas
+      final pollaIds = allBets.map((b) => b.pollaId).toSet();
+      for (final pid in pollaIds) {
+        try {
+          if (MatchConstants.getAllMatches(pollaId: pid).isNotEmpty) continue;
+          final matches = await _matchService.getMatchesForBetScreen(pid);
+          if (matches.isNotEmpty) {
+            MatchConstants.setMatches(matches, pollaId: pid);
+          }
+        } catch (_) {}
+      }
+
       setState(() {
         _bets = allBets;
         _isLoading = false;

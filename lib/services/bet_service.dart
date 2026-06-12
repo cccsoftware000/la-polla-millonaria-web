@@ -3,7 +3,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../core/constants/bet_status.dart';
 import '../models/bet_model.dart';
-import 'accumulated_service.dart';
 
 class BetService {
   final FirebaseFirestore firestore = FirebaseFirestore.instance;
@@ -371,10 +370,12 @@ class BetService {
         throw Exception('Esta apuesta ya fue confirmada');
       }
 
-      final accumulatedService = AccumulatedService();
-      await accumulatedService.incrementAccumulatedForBet(bet);
-
-      await updateBetStatus(betId: bet.id, status: BetStatus.active);
+      // La Cloud Function onBetPaid es la unica responsable de incrementar el pozo.
+      // Aqui solo marcamos paymentConfirmed; el backend valida si la polla sigue abierta.
+      await firestore.collection(_betsCollection).doc(bet.id).update({
+        'paymentConfirmed': true,
+        'paymentConfirmedAt': FieldValue.serverTimestamp(),
+      });
     } catch (e) {
       throw Exception('Error al confirmar el pago: $e');
     }
